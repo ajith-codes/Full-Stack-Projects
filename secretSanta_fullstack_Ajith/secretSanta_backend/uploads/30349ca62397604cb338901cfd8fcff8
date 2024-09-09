@@ -1,0 +1,198 @@
+app.controller('moveautoModalCtrl', ["$scope", "$rootScope", "$http", "$uibModalInstance", "wizardService",
+    "$uibModal", "$window", "SweetAlert", "$timeout", "$filter", "$state", "$stateParams", "$sessionStorage",
+  function($scope, $rootScope, $http, $uibModalInstance, ws, $uibModal, $window, SweetAlert, $timeout, 
+    $filter, $state, $stateParams, $sessionStorage) {
+  
+
+    const URL = ws.getUrl();
+    $scope.hide = function() {
+      $rootScope.showloader = false;
+    };
+    $scope.show = function() {
+      $rootScope.showloader = true;
+    };
+    $scope.show();
+  
+    $scope.cancelButton = function() {
+        $uibModalInstance.dismiss('cancel');
+    };
+
+   var rateId = 1;
+    $scope.getrateDetails = function(){
+      $http.get(`${URL}/rate/input/${rateId}`, {
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + ws.getToken()
+        }
+        }).then(response => {
+            $scope.rateData = response.data.data.output;
+            $scope.hide()
+        }).catch(error => {
+            $scope.hide();
+            console.error("Error querying single job: ", error);
+        });
+    };
+      
+    $scope.getrateDetails();
+
+    $scope.zipvalidation = function (zipcode, ratelineItem) {
+      if (zipcode && zipcode.length > 4) {
+        $http({
+          method: 'GET',
+          url: `${URL}rate/validate/${zipcode}`,
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + ws.getToken()
+          }
+        }).then(response => {
+          const data = response.data;
+          if (data.isSuccess === 0) {
+            ratelineItem.isValidZip = false;
+          } else {
+            ratelineItem.isValidZip = true;
+          }
+        }).catch(error => {
+          ratelineItem.isValidZip = true;
+        });
+      } else {
+      }
+    };
+    
+  
+    
+
+  $scope.milescalculate = function(lineItem){
+    var shipTo;
+    var shipFrom;
+    angular.forEach(lineItem, function(ratelineItem){
+         if(ratelineItem.itemKey == 'shipFrom'){
+           shipFrom = ratelineItem.value;
+        }
+        if(ratelineItem.itemKey == 'shipTo'){
+           shipTo = ratelineItem.value;
+        }
+    });
+ 
+    if(shipTo != undefined && shipFrom != undefined) {
+      var postValue = {
+        "rateTypeId": 1,
+        "shipFrom": shipFrom,
+        "shipTo": shipTo
+        }
+        
+        
+        $http({
+          method  : 'POST',
+          url     : URL + "rate/miles",
+          headers : {"Content-Type": "application/json","Authorization": "Bearer " + ws.getToken()},
+          data    : postValue
+      }).success(function(data, status, headers, config){
+
+          $scope.miles    = data.data.output.miles;
+          $scope.mileId   = data.data.output.mileId;
+          $scope.ruralFee = data.data.output.ruralFee;
+
+          angular.forEach($scope.rateData.rateLineItem, function(data){
+            angular.forEach(data.lineItem, function(lineItemtype){
+              if(lineItemtype.itemKey == "ruralFee"){
+                lineItemtype.rate = $scope.ruralFee;
+              }
+            });
+          });
+      }).error(function(data, status, headers, config) {
+      });
+    }
+  };
+    
+
+
+
+
+
+    var lineItems = {};
+    $scope.showsummary = false;
+    var transportType;
+    $scope.rateCalculate = function(valid){
+    if(valid){
+      $scope.show()
+      angular.forEach($scope.rateData.rateLineItem,function(data){
+        
+        angular.forEach(data.lineItem,function(datalineItem){
+          var itemkey = datalineItem.itemKey;
+          // if(datalineItem.itemConfig.isMandatory == 1)
+          if(datalineItem.itemConfig.inputType == 'text' && datalineItem.itemConfig.format != 'rate' && datalineItem.itemConfig.format != 'date'){
+            Object.assign(lineItems, {[itemkey]: {
+              "rateItemId": datalineItem.rateItemId,
+              "itemName"  : datalineItem.itemName,
+              "value"     : datalineItem.value,
+              "itemKey"   : datalineItem.itemKey,
+            }});
+          }else if(datalineItem.itemConfig.inputType == 'text' && datalineItem.itemConfig.format == 'date'){
+            var dateTime = $filter("date")(datalineItem.date, "yyyy-MM-dd");
+            Object.assign(lineItems, {[itemkey]: {
+              "rateItemId": datalineItem.rateItemId,
+              "itemName"  : datalineItem.itemName,
+              "date"      : datalineItem.date,
+              "itemKey"   : datalineItem.itemKey,
+            }});
+          }else if(datalineItem.itemConfig.inputType == 'text' && datalineItem.itemConfig.format == 'rate'){
+            Object.assign(lineItems, {[itemkey]: {
+              "rateItemId": datalineItem.rateItemId,
+              "itemName"  : datalineItem.itemName + ' ' + datalineItem.suffix,
+              "rate"      : datalineItem.rate,
+              "itemKey"   : datalineItem.itemKey,
+            }});
+          }else if(datalineItem.itemConfig.inputType == 'radio'){
+            Object.assign(lineItems, {[itemkey]: {
+              "rateItemId": datalineItem.rateItemId,
+              "itemName"  : datalineItem.itemName,
+              "value"     : datalineItem.value,
+              "itemKey"   : datalineItem.itemKey,
+              // "rateItemTypeId": 1
+            }});
+          }else if(datalineItem.itemConfig.inputType == 'checkbox'){
+            Object.assign(lineItems, {[itemkey]: {
+              "rateItemId": datalineItem.rateItemId,
+              "itemName"  : datalineItem.itemName,
+              "value"     : datalineItem.value,
+              "itemKey"   : datalineItem.itemKey,
+              // "rateItemTypeId": 1
+            }});
+          }
+
+          
+
+        });
+      });
+
+      var postdata = {
+        "rateTypeId": 1,
+        "rateId": 1,
+        "mileId": $scope.mileId,
+        "miles": $scope.miles,
+        lineItems
+      };
+
+
+
+      console.log(postdata, 'postdata');
+      $http.post(`${URL}rate/summary`, postdata, {
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + ws.getToken()
+        }
+    }).then(response => {
+        if (response.data.isSuccess == 0) {
+            $scope.showsummary = true;
+            $scope.rateSummaryData = response.data.data.output;
+            $scope.hide()
+         }
+    }).catch(error => {
+        console.error('Error updating job revenue detail:', error);
+        $scope.hide()
+    });
+    };
+  }
+    }
+  ]);
+  
